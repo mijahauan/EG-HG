@@ -28,13 +28,10 @@ clif_grammar = r"""
 """
 clif_parser = Lark(clif_grammar, start='start')
 
-# --- Pytest-based Round-trip Test ---
 
-@pytest.mark.parametrize("corpus_item", clif_corpus, ids=[item['description'] for item in clif_corpus])
-def test_roundtrip_translation(corpus_item):
+def _perform_roundtrip_test(corpus_item: dict):
     """
-    Tests that a CLIF string can be translated to a hypergraph and back
-    to a logically equivalent CLIF string.
+    Helper function to perform a full round-trip test on a single corpus item.
     """
     original_clif = corpus_item['clif']
     description = corpus_item['description']
@@ -70,3 +67,90 @@ def test_roundtrip_translation(corpus_item):
                     f"Round-trip: {roundtrip_clif}\n" \
                     f"Error: {e}")
 
+# --- Test Suite ---
+# Each test function corresponds to an entry in the corpus for clarity.
+
+def test_simple_ligature():
+    """Probes a simple existential with a two-place conjunction."""
+    item = next(i for i in clif_corpus if "Simple ligature" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_complex_ligature():
+    """Probes a more complex existential with multiple variables and predicates."""
+    item = next(i for i in clif_corpus if "Complex ligature" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_cycle_ligature():
+    """Probes a cycle of three relations to test ligature handling."""
+    item = next(i for i in clif_corpus if "cycle of three relations" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_simple_negation():
+    """Probes a simple negation, equivalent to a universal quantifier."""
+    item = next(i for i in clif_corpus if "Simple negation" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_de_morgan():
+    """Probes the negation of a conjunction (De Morgan's laws)."""
+    item = next(i for i in clif_corpus if "De Morgan's laws" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_double_negation():
+    """Probes a double negation, which should resolve."""
+    item = next(i for i in clif_corpus if "Double negation" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_standard_universal():
+    """Probes a standard universal quantifier with implication."""
+    item = next(i for i in clif_corpus if "standard universal" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_nested_quantifiers():
+    """Probes a nested existential quantifier inside a universal one."""
+    item = next(i for i in clif_corpus if "nested existential" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_universal_two_variables():
+    """Probes a universal quantifier with two variables."""
+    item = next(i for i in clif_corpus if "Universal quantifier with two variables" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_simple_function():
+    """Probes a simple function expression with constants."""
+    item = next(i for i in clif_corpus if "Simple function" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_function_in_existential():
+    """Probes a function used within an existential context."""
+    item = next(i for i in clif_corpus if "Function used within an existential" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_nested_functions():
+    """Probes nested functions within a universal quantifier."""
+    item = next(i for i in clif_corpus if "Nested functions" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_zero_arity_proposition():
+    """Probes a simple, zero-arity proposition (a constant)."""
+    item = next(i for i in clif_corpus if "zero-arity" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_disjunction_of_existentials():
+    """Probes a disjunction of two separate existential statements."""
+    item = next(i for i in clif_corpus if "Disjunction of two separate" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_existential_over_disjunction():
+    """Probes an existential quantifier over a disjunction."""
+    item = next(i for i in clif_corpus if "Existential quantifier over a disjunction" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_implication_with_conjunction():
+    """Probes an implication with a conjunction in the antecedent."""
+    item = next(i for i in clif_corpus if "Implication with a conjunction" in i['description'])
+    _perform_roundtrip_test(item)
+
+def test_all_cats_are_black():
+    """Probes the common idiom for 'All X are Y'."""
+    item = next(i for i in clif_corpus if "All cats are black" in i['description'])
+    _perform_roundtrip_test(item)

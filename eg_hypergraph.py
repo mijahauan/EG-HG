@@ -169,4 +169,3 @@ class EGHg:
     def __repr__(self) -> str:
         """Provides a concise string representation of the entire graph."""
         return f"EGHg(nodes={len(self.nodes)}, edges={len(self.edges)})"
-

@@ -3,7 +3,7 @@ hypergraph_to_clif.py
 
 This module provides the translator for converting an EGHg (Existential Graph
 as a Hypergraph) model back into a CLIF (Common Logic Interchange Format) string.
-This version preserves order and reconstructs forall/if statements.
+This version preserves order and reconstructs forall/if/or statements.
 """
 
 import uuid
