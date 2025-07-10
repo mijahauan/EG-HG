@@ -167,16 +167,16 @@ class EGTransformation:
             raise ValueError(f"Target container {target_container_id} does not exist.")
 
         id_map = {}
-        nodes_in_subgraph = {item_id for item_id in item_ids if item_id in self.hg.nodes}
-        edges_in_subgraph = [item_id for item_id in item_ids if item_id in self.hg.edges]
+        nodes_to_copy = {item_id for item_id in item_ids if item_id in self.hg.nodes}
+        edges_to_copy = [item_id for item_id in item_ids if item_id in self.hg.edges]
 
-        for node_id in nodes_in_subgraph:
+        for node_id in nodes_to_copy:
             source_node = self.hg.nodes[node_id]
             new_node = Node(source_node.type, source_node.properties.copy())
             self.hg.add_node(new_node, target_container)
             id_map[node_id] = new_node.id
 
-        for edge_id in edges_in_subgraph:
+        for edge_id in edges_to_copy:
             source_edge = self.hg.edges[edge_id]
             new_node_ids = [id_map.get(n_id, n_id) for n_id in source_edge.nodes]
             new_edge = Hyperedge(source_edge.type, new_node_ids, source_edge.properties.copy())
@@ -200,22 +200,18 @@ class EGTransformation:
         if not item_ids: return
         container_id = self._validate_subgraph(item_ids)
         
-        # Generate the signature of the graph to be de-iterated.
         target_signature = self._get_canonical_signature(item_ids)
+        if not target_signature: return # Cannot de-iterate an empty graph
 
-        # Walk up the ancestor contexts to find a match.
         current_container_id = container_id
         match_found = False
         while not match_found:
-            # Move to the parent context.
-            if current_container_id is None: break # Reached the SA, no more ancestors
+            if current_container_id is None: break
             current_container_id = self.hg.containment.get(current_container_id)
-
-            # Check all items in the ancestor context for a match.
+            
             ancestor_items = self.hg.get_items_in_context(current_container_id)
+            # This is a simplification. A full implementation would need to check all subsets.
             for potential_match_id in ancestor_items:
-                # A simple check: if it's a predicate, does the name match?
-                # This is a heuristic to avoid checking every single item.
                 if potential_match_id in self.hg.edges:
                     potential_match_sig = self._get_canonical_signature([potential_match_id])
                     if potential_match_sig == target_signature:
@@ -226,7 +222,6 @@ class EGTransformation:
         if not match_found:
             raise ValueError("De-iteration is not valid: no identical graph found in an enclosing context.")
             
-        # If a match was found, the de-iteration is valid, so we can erase.
         for item_id in item_ids:
             self._erase_recursive(item_id)
 
@@ -238,7 +233,7 @@ class EGTransformation:
         source_items = source_graph.get_items_in_context(source_container_id)
 
         for item_id in source_items:
-            if item_id in source_graph.nodes and source_graph.containment.get(item_id) == source_container_id:
+            if item_id in source_graph.nodes:
                 source_node = source_graph.nodes[item_id]
                 if item_id not in id_map:
                     new_node = Node(source_node.type, source_node.properties.copy())
