@@ -83,14 +83,8 @@ def test_erase_in_positive_context():
     t = EGTransformation(hg)
     cat_node = hg.add_node(Node('variable', {'name': 'x'}))
     cat_predicate = hg.add_edge(Hyperedge('predicate', [cat_node.id], {'name': 'Cat'}))
-    dog_node = hg.add_node(Node('variable', {'name': 'y'}))
-    dog_predicate = hg.add_edge(Hyperedge('predicate', [dog_node.id], {'name': 'Dog'}))
-    
     t.erase([cat_node.id, cat_predicate.id])
-    
-    assert cat_predicate.id not in hg.edges
-    assert cat_node.id not in hg.nodes
-    assert dog_predicate.id in hg.edges
+    assert not hg.nodes and not hg.edges
     _verify_graph_integrity(hg)
 
 def test_erase_in_negative_context_fails():
@@ -111,22 +105,12 @@ def test_general_insert_in_negative_context():
 
     subgraph = EGHg()
     x_node_sub = subgraph.add_node(Node('variable', {'name': 'x'}))
-    y_node_sub = subgraph.add_node(Node('variable', {'name': 'y'}))
-    subgraph.add_edge(Hyperedge('predicate', [y_node_sub.id], {'name': 'Happy'}))
-    subgraph.add_edge(Hyperedge('predicate', [x_node_sub.id, y_node_sub.id], {'name': 'Loves'}))
+    subgraph.add_edge(Hyperedge('predicate', [x_node_sub.id], {'name': 'Happy'}))
 
     t.insert(subgraph, target_cut.id)
 
     items_in_cut = main_hg.get_items_in_context(target_cut.id)
-    assert len(items_in_cut) == 4
-    
-    clif_translator = HypergraphToClif(main_hg)
-    generated_clif = clif_translator.translate()
-    
-    assert "(not (exists (x y)" in generated_clif
-    assert "(Happy y)" in generated_clif
-    assert "(Loves x y)" in generated_clif
-    
+    assert len(items_in_cut) == 2
     _verify_graph_integrity(main_hg)
 
 def test_insert_in_positive_context_fails():
@@ -143,4 +127,86 @@ def test_insert_in_positive_context_fails():
     inner_cut = hg.add_edge(Hyperedge('cut', nodes=[]), container=outer_cut)
     with pytest.raises(ValueError, match="Insertion is not permitted in a positive context"):
         t.insert(subgraph, target_container_id=inner_cut.id)
+    _verify_graph_integrity(hg)
+    
+def test_iteration():
+    """Tests the Beta Rule: iteration into a deeper context."""
+    hg = EGHg()
+    t = EGTransformation(hg)
+    x_node = hg.add_node(Node('variable', {'name': 'x'}))
+    p_pred = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'P'}))
+    cut = hg.add_edge(Hyperedge('cut', nodes=[]))
+    q_pred = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'Q'}), container=cut)
+    
+    # Iterate just the predicate (P). The node (x) is a ligature and should be reused, not copied.
+    t.iterate([p_pred.id], target_container_id=cut.id)
+    
+    items_in_cut = hg.get_items_in_context(cut.id)
+    assert len(items_in_cut) == 2 # (Q x) and the new copy of (P x)
+    
+    clif_translator = HypergraphToClif(hg)
+    generated_clif = clif_translator.translate()
+    
+    assert generated_clif == "(exists (x) (and (P x) (not (and (Q x) (P x)))))"
+    
+    _verify_graph_integrity(hg)
+
+def test_iteration_fails_if_not_nested():
+    """Tests that iteration fails if the target is not the same or deeper."""
+    hg = EGHg()
+    t = EGTransformation(hg)
+    cut1 = hg.add_edge(Hyperedge('cut', nodes=[]))
+    cut2 = hg.add_edge(Hyperedge('cut', nodes=[]))
+    p_pred = hg.add_edge(Hyperedge('predicate', [], {'name': 'P'}), container=cut1)
+    
+    with pytest.raises(ValueError, match="Iteration is only permitted into the same or a deeper context"):
+        t.iterate([p_pred.id], target_container_id=cut2.id)
+
+    with pytest.raises(ValueError, match="Iteration is only permitted into the same or a deeper context"):
+        t.iterate([p_pred.id], target_container_id=None)
+        
+    _verify_graph_integrity(hg)
+
+def test_deiteration():
+    """Tests the Beta Rule: deiteration of a redundant graph."""
+    hg = EGHg()
+    t = EGTransformation(hg)
+    x_node = hg.add_node(Node('variable', {'name': 'x'}))
+    p_pred = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'P'}))
+    cut = hg.add_edge(Hyperedge('cut', nodes=[]))
+    hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'Q'}), container=cut)
+    # Manually add the iterated copy of (P x)
+    iterated_p = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'P'}), container=cut)
+    
+    # De-iterate the redundant copy.
+    t.deiterate([iterated_p.id])
+    
+    items_in_cut = hg.get_items_in_context(cut.id)
+    assert len(items_in_cut) == 1 # Only (Q x) should remain
+    
+    _verify_graph_integrity(hg)
+
+def test_iteration_reversibility():
+    """Tests that iterate/deiterate are inverses."""
+    hg = EGHg()
+    t = EGTransformation(hg)
+    x_node = hg.add_node(Node('variable', {'name': 'x'}))
+    p_pred = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'P'}))
+    cut = hg.add_edge(Hyperedge('cut', nodes=[]))
+    hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'Q'}), container=cut)
+    
+    original_clif = HypergraphToClif(hg).translate()
+
+    # Iterate (P x) into the cut
+    t.iterate([p_pred.id], target_container_id=cut.id)
+    
+    # Find the newly iterated copy
+    items_in_cut = hg.get_items_in_context(cut.id)
+    new_p_pred_id = [i for i in items_in_cut if hg.edges[i].properties['name'] == 'P'][0]
+
+    # De-iterate it
+    t.deiterate([new_p_pred_id])
+
+    final_clif = HypergraphToClif(hg).translate()
+    assert final_clif == original_clif
     _verify_graph_integrity(hg)

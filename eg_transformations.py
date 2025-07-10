@@ -51,8 +51,10 @@ class EGTransformation:
         if item_ids:
             original_container_list = self.hg.edges[container_id].contained_items if container_id else None
             for item_id in list(item_ids):
+                # When moving from SA, there's no list to remove from.
                 if original_container_list is not None:
-                    original_container_list.remove(item_id)
+                    if item_id in original_container_list:
+                         original_container_list.remove(item_id)
                 self.hg.containment[item_id] = inner_cut.id
                 inner_cut.contained_items.append(item_id)
                 
@@ -72,14 +74,14 @@ class EGTransformation:
         parent_container = self.hg.edges.get(parent_container_id) if parent_container_id else None
         items_to_promote = list(inner_cut.contained_items)
 
+        if parent_container:
+            parent_container.contained_items.remove(outer_cut_id)
+        
         for item_id in items_to_promote:
             self.hg.containment[item_id] = parent_container_id
             if parent_container:
                 parent_container.contained_items.append(item_id)
 
-        if parent_container:
-            parent_container.contained_items.remove(outer_cut_id)
-        
         del self.hg.containment[outer_cut_id]
         del self.hg.containment[inner_cut_id]
         del self.hg.edges[outer_cut_id]
@@ -88,7 +90,7 @@ class EGTransformation:
     def erase(self, item_ids: List[uuid.UUID]):
         """Beta Rule: Erases a subgraph from a positive context."""
         if not item_ids: return
-        container_id = self._validate_subgraph(item_ids)
+        self._validate_subgraph(item_ids)
         depth = self.hg.get_context_depth(item_ids[0])
         if depth % 2 != 0:
             raise ValueError(f"Erasure is not permitted in a negative context (depth {depth}).")
@@ -114,14 +116,7 @@ class EGTransformation:
         if item_id in self.hg.containment: del self.hg.containment[item_id]
 
     def insert(self, subgraph: EGHg, target_container_id: Optional[EdgeId]):
-        """
-        Beta Rule: Inserts (copies) a subgraph into a negative context.
-
-        Args:
-            subgraph (EGHg): A separate EGHg object representing the graph to insert.
-            target_container_id (Optional[EdgeId]): The ID of the cut where the
-                subgraph should be placed. Must be a negative context.
-        """
+        """Beta Rule: Inserts (copies) a subgraph into a negative context."""
         if target_container_id is None:
              raise ValueError("Insertion is only permitted in negative contexts (i.e., inside a cut).")
         
@@ -133,41 +128,74 @@ class EGTransformation:
         if not target_container or target_container.type != 'cut':
             raise ValueError("Target container for insertion must be a cut.")
 
-        # Perform a deep copy of the subgraph into the target container.
         self._copy_recursive(subgraph, None, target_container)
 
-    def _copy_recursive(self, source_graph: EGHg, source_container_id: Optional[EdgeId], target_container: Hyperedge, id_map: Optional[Dict[uuid.UUID, uuid.UUID]] = None):
+    def iterate(self, item_ids: List[uuid.UUID], target_container_id: Optional[EdgeId]):
+        """Beta Rule: Copies a subgraph into the same or a deeper context."""
+        source_container_id = self._validate_subgraph(item_ids)
+        if not self.hg.is_ancestor(source_container_id, target_container_id):
+            raise ValueError("Iteration is only permitted into the same or a deeper context.")
+
+        target_container = self.hg.edges.get(target_container_id)
+        if target_container_id and not target_container:
+            raise ValueError(f"Target container {target_container_id} does not exist.")
+
+        id_map = {}
+        nodes_in_subgraph = {item_id for item_id in item_ids if item_id in self.hg.nodes}
+        edges_in_subgraph = [item_id for item_id in item_ids if item_id in self.hg.edges]
+
+        for node_id in nodes_in_subgraph:
+            source_node = self.hg.nodes[node_id]
+            new_node = Node(source_node.type, source_node.properties.copy())
+            self.hg.add_node(new_node, target_container)
+            id_map[node_id] = new_node.id
+
+        for edge_id in edges_in_subgraph:
+            source_edge = self.hg.edges[edge_id]
+            new_node_ids = [id_map.get(n_id, n_id) for n_id in source_edge.nodes]
+            new_edge = Hyperedge(source_edge.type, new_node_ids, source_edge.properties.copy())
+            self.hg.add_edge(new_edge, target_container)
+            id_map[edge_id] = new_edge.id
+
+            if new_edge.type == 'cut':
+                temp_subgraph = EGHg()
+                for item in source_edge.contained_items:
+                    if item in self.hg.nodes:
+                        temp_subgraph.add_node(Node(self.hg.nodes[item].type, self.hg.nodes[item].properties.copy(), node_id=item))
+                    elif item in self.hg.edges:
+                        temp_subgraph.add_edge(Hyperedge(self.hg.edges[item].type, self.hg.edges[item].nodes, self.hg.edges[item].properties.copy(), edge_id=item))
+                self._copy_recursive(temp_subgraph, None, new_edge, id_map)
+
+    def deiterate(self, item_ids: List[uuid.UUID]):
+        """
+        Beta Rule: Removes a subgraph that is a redundant copy of a graph
+        in an enclosing context. A full implementation requires graph isomorphism,
+        so this version performs a simple erasure without context checks.
+        """
+        if not item_ids: return
+        self._validate_subgraph(item_ids)
+        for item_id in item_ids:
+            self._erase_recursive(item_id)
+
+    def _copy_recursive(self, source_graph: EGHg, source_container_id: Optional[EdgeId], target_container: Optional[Hyperedge], id_map: Optional[Dict[uuid.UUID, uuid.UUID]] = None):
         """
         Recursively copies the contents of a source container into a target container.
         """
-        if id_map is None:
-            id_map = {}
-
+        if id_map is None: id_map = {}
         source_items = source_graph.get_items_in_context(source_container_id)
 
         for item_id in source_items:
-            # Copy Nodes
-            if item_id in source_graph.nodes:
+            if item_id in source_graph.nodes and source_graph.containment.get(item_id) == source_container_id:
                 source_node = source_graph.nodes[item_id]
-                new_node = Node(source_node.type, source_node.properties.copy())
-                self.hg.add_node(new_node, target_container)
-                id_map[item_id] = new_node.id
-            
-            # Copy Edges
+                if item_id not in id_map:
+                    new_node = Node(source_node.type, source_node.properties.copy())
+                    self.hg.add_node(new_node, target_container)
+                    id_map[item_id] = new_node.id
             elif item_id in source_graph.edges:
                 source_edge = source_graph.edges[item_id]
-                # Map old node IDs to new node IDs for the new edge.
-                new_node_ids = [id_map[n_id] for n_id in source_edge.nodes]
-                
-                new_edge = Hyperedge(
-                    source_edge.type,
-                    new_node_ids,
-                    source_edge.properties.copy()
-                )
+                new_node_ids = [id_map.get(n_id, n_id) for n_id in source_edge.nodes]
+                new_edge = Hyperedge(source_edge.type, new_node_ids, source_edge.properties.copy())
                 self.hg.add_edge(new_edge, target_container)
                 id_map[item_id] = new_edge.id
-
-                # If the edge is a cut, recurse into it.
                 if new_edge.type == 'cut':
                     self._copy_recursive(source_graph, item_id, new_edge, id_map)
-
