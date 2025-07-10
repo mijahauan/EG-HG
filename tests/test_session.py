@@ -88,7 +88,10 @@ def test_new_transformation_after_undo():
     """
     session = EGSession()
     session.apply_transformation('add_double_cut', item_ids=[], container_id=None) # State 1
-    session.apply_transformation('add_double_cut', item_ids=[], container_id=list(session.current_graph.edges.keys())[0]) # State 2
+    
+    # Get the ID of the outer cut in state 1
+    outer_cut_id_s1 = list(session.current_graph.edges.keys())[0]
+    session.apply_transformation('add_double_cut', item_ids=[], container_id=outer_cut_id_s1) # State 2
     
     session.undo() # Back to state 1
     
