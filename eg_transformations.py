@@ -3,13 +3,10 @@ eg_transformations.py
 
 This module provides a class for applying Peirce's transformation rules
 (Alpha and Beta) to an Existential Graph represented by the EGHg model.
-
-Each method corresponds to a rule of inference and includes checks to ensure
-the rule is applied validly according to the logical context of the elements.
 """
 
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from eg_hypergraph import EGHg, Hyperedge, Node, NodeId, EdgeId
 
@@ -18,105 +15,61 @@ class EGTransformation:
     A controller class that applies transformation rules to an EGHg object.
     """
     def __init__(self, hg: EGHg):
-        """
-        Initializes the transformation controller.
-
-        Args:
-            hg (EGHg): The hypergraph object to be transformed.
-        """
         self.hg = hg
 
+    def _validate_subgraph(self, item_ids: List[uuid.UUID]) -> Optional[EdgeId]:
+        """
+        Validates that a list of item IDs constitutes a proper subgraph within
+        a single context.
+        """
+        if not item_ids:
+            raise ValueError("Item list cannot be empty for this operation.")
+        first_item_id = item_ids[0]
+        if first_item_id not in self.hg.containment:
+            raise ValueError(f"Item {first_item_id} not found in the graph.")
+        container_id = self.hg.containment[first_item_id]
+        for item_id in item_ids[1:]:
+            if self.hg.containment.get(item_id) != container_id:
+                raise ValueError("All items must be in the same container.")
+        return container_id
+
     def add_double_cut(self, item_ids: List[uuid.UUID], container_id: Optional[EdgeId] = None):
-        """
-        Alpha Rule: Inserts a double cut.
-
-        - If item_ids are provided, it draws the cut around them. All items
-          must reside in the same context. If container_id is also provided,
-          it is used for validation.
-        - If item_ids is empty, it draws an empty double cut in the context
-          specified by container_id.
-
-        Args:
-            item_ids (List[uuid.UUID]): A list of IDs to enclose.
-            container_id (Optional[EdgeId]): The context in which to place the
-                new cut. If None, the context is the Sheet of Assertion.
-        """
-        # --- Validation Step ---
+        """Alpha Rule: Inserts a double cut."""
         if item_ids:
-            # If items are given, determine their container and validate consistency.
-            inferred_container_id = self.hg.containment.get(item_ids[0])
+            inferred_container_id = self._validate_subgraph(item_ids)
             if container_id is not None and container_id != inferred_container_id:
                 raise ValueError("Provided container_id does not match the container of the items.")
-            
-            # Use the inferred container as the true container.
             container_id = inferred_container_id
-
-            for item_id in item_ids[1:]:
-                if self.hg.containment.get(item_id) != container_id:
-                    raise ValueError("All items for a double cut must be in the same container.")
         
         container = self.hg.edges.get(container_id) if container_id else None
         if container_id and not container:
              raise ValueError(f"Target container with ID {container_id} does not exist.")
 
-        # 1. Create the outer and inner cuts.
-        outer_cut = Hyperedge(edge_type='cut', nodes=[])
-        inner_cut = Hyperedge(edge_type='cut', nodes=[])
+        outer_cut = self.hg.add_edge(Hyperedge(edge_type='cut', nodes=[]), container)
+        inner_cut = self.hg.add_edge(Hyperedge(edge_type='cut', nodes=[]), container=outer_cut)
 
-        # 2. Place the cuts in the graph.
-        self.hg.add_edge(outer_cut, container)
-        self.hg.add_edge(inner_cut, outer_cut)
-
-        # 3. Move the specified items inside the new inner cut.
         if item_ids:
-            # Get the original container's list of items to modify it.
-            original_container_list = None
-            if container_id:
-                original_container_list = self.hg.edges[container_id].contained_items
-
+            original_container_list = self.hg.edges[container_id].contained_items if container_id else None
             for item_id in list(item_ids):
                 if original_container_list is not None:
                     original_container_list.remove(item_id)
-                else: # Item was on the Sheet of Assertion
-                    # We need to update the containment map directly
-                    pass
-            
                 self.hg.containment[item_id] = inner_cut.id
                 inner_cut.contained_items.append(item_id)
                 
     def remove_double_cut(self, outer_cut_id: EdgeId):
-        """
-        Alpha Rule: Removes a double cut.
-
-        This is valid only if the outer cut contains nothing but a single
-        inner cut. Ligatures passing through the space between the cuts are
-        permitted.
-
-        Args:
-            outer_cut_id (EdgeId): The ID of the outer cut of the double cut pair.
-        """
-        # --- Validation Step ---
+        """Alpha Rule: Removes a double cut."""
         outer_cut = self.hg.edges.get(outer_cut_id)
         if not outer_cut or outer_cut.type != 'cut':
             raise ValueError(f"Item {outer_cut_id} is not a valid cut.")
-
-        # The space between the cuts must be empty of any predicates or nodes.
-        # It should contain exactly one item: the inner cut.
-        contained_items = outer_cut.contained_items
-        if len(contained_items) != 1:
+        if len(outer_cut.contained_items) != 1:
             raise ValueError("Invalid double cut: Outer cut is not empty besides the inner cut.")
-
-        inner_cut_id = contained_items[0]
+        inner_cut_id = outer_cut.contained_items[0]
         inner_cut = self.hg.edges.get(inner_cut_id)
         if not inner_cut or inner_cut.type != 'cut':
             raise ValueError("Invalid double cut: Item inside outer cut is not a cut itself.")
 
-        # --- Transformation Step ---
-        # Get the container of the outer cut.
         parent_container_id = self.hg.containment.get(outer_cut_id)
         parent_container = self.hg.edges.get(parent_container_id) if parent_container_id else None
-
-        # Items from the inner cut will be "promoted" to the parent container.
         items_to_promote = list(inner_cut.contained_items)
 
         for item_id in items_to_promote:
@@ -124,12 +77,97 @@ class EGTransformation:
             if parent_container:
                 parent_container.contained_items.append(item_id)
 
-        # Remove the double cut from the graph.
         if parent_container:
             parent_container.contained_items.remove(outer_cut_id)
         
-        del self.hg.edges[outer_cut_id]
-        del self.hg.edges[inner_cut_id]
         del self.hg.containment[outer_cut_id]
         del self.hg.containment[inner_cut_id]
+        del self.hg.edges[outer_cut_id]
+        del self.hg.edges[inner_cut_id]
+
+    def erase(self, item_ids: List[uuid.UUID]):
+        """Beta Rule: Erases a subgraph from a positive context."""
+        if not item_ids: return
+        container_id = self._validate_subgraph(item_ids)
+        depth = self.hg.get_context_depth(item_ids[0])
+        if depth % 2 != 0:
+            raise ValueError(f"Erasure is not permitted in a negative context (depth {depth}).")
+        for item_id in item_ids:
+            self._erase_recursive(item_id)
+
+    def _erase_recursive(self, item_id: uuid.UUID):
+        """Helper to recursively erase an item and its contents."""
+        item = self.hg.nodes.get(item_id) or self.hg.edges.get(item_id)
+        if not item: return
+
+        if isinstance(item, Hyperedge) and item.type == 'cut':
+            for contained_id in list(item.contained_items):
+                self._erase_recursive(contained_id)
+
+        container_id = self.hg.containment.get(item_id)
+        if container_id and self.hg.edges.get(container_id):
+            if item_id in self.hg.edges[container_id].contained_items:
+                self.hg.edges[container_id].contained_items.remove(item_id)
+
+        if item_id in self.hg.nodes: del self.hg.nodes[item_id]
+        elif item_id in self.hg.edges: del self.hg.edges[item_id]
+        if item_id in self.hg.containment: del self.hg.containment[item_id]
+
+    def insert(self, subgraph: EGHg, target_container_id: Optional[EdgeId]):
+        """
+        Beta Rule: Inserts (copies) a subgraph into a negative context.
+
+        Args:
+            subgraph (EGHg): A separate EGHg object representing the graph to insert.
+            target_container_id (Optional[EdgeId]): The ID of the cut where the
+                subgraph should be placed. Must be a negative context.
+        """
+        if target_container_id is None:
+             raise ValueError("Insertion is only permitted in negative contexts (i.e., inside a cut).")
+        
+        depth = self.hg.get_context_depth(target_container_id) + 1
+        if depth % 2 == 0:
+            raise ValueError(f"Insertion is not permitted in a positive context (depth {depth}).")
+
+        target_container = self.hg.edges.get(target_container_id)
+        if not target_container or target_container.type != 'cut':
+            raise ValueError("Target container for insertion must be a cut.")
+
+        # Perform a deep copy of the subgraph into the target container.
+        self._copy_recursive(subgraph, None, target_container)
+
+    def _copy_recursive(self, source_graph: EGHg, source_container_id: Optional[EdgeId], target_container: Hyperedge, id_map: Optional[Dict[uuid.UUID, uuid.UUID]] = None):
+        """
+        Recursively copies the contents of a source container into a target container.
+        """
+        if id_map is None:
+            id_map = {}
+
+        source_items = source_graph.get_items_in_context(source_container_id)
+
+        for item_id in source_items:
+            # Copy Nodes
+            if item_id in source_graph.nodes:
+                source_node = source_graph.nodes[item_id]
+                new_node = Node(source_node.type, source_node.properties.copy())
+                self.hg.add_node(new_node, target_container)
+                id_map[item_id] = new_node.id
+            
+            # Copy Edges
+            elif item_id in source_graph.edges:
+                source_edge = source_graph.edges[item_id]
+                # Map old node IDs to new node IDs for the new edge.
+                new_node_ids = [id_map[n_id] for n_id in source_edge.nodes]
+                
+                new_edge = Hyperedge(
+                    source_edge.type,
+                    new_node_ids,
+                    source_edge.properties.copy()
+                )
+                self.hg.add_edge(new_edge, target_container)
+                id_map[item_id] = new_edge.id
+
+                # If the edge is a cut, recurse into it.
+                if new_edge.type == 'cut':
+                    self._copy_recursive(source_graph, item_id, new_edge, id_map)
 
