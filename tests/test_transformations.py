@@ -138,7 +138,7 @@ def test_iteration():
     cut = hg.add_edge(Hyperedge('cut', nodes=[]))
     q_pred = hg.add_edge(Hyperedge('predicate', [x_node.id], {'name': 'Q'}), container=cut)
     
-    # Iterate just the predicate (P). The node (x) is a ligature and should be reused, not copied.
+    # Iterate just the predicate (P). The node (x) is a ligature and should be reused.
     t.iterate([p_pred.id], target_container_id=cut.id)
     
     items_in_cut = hg.get_items_in_context(cut.id)
@@ -186,6 +186,17 @@ def test_deiteration():
     
     _verify_graph_integrity(hg)
 
+def test_deiteration_fails_if_no_match():
+    """Tests that deiteration fails if no matching graph exists in an ancestor context."""
+    hg = EGHg()
+    t = EGTransformation(hg)
+    cut = hg.add_edge(Hyperedge('cut', nodes=[]))
+    p_pred = hg.add_edge(Hyperedge('predicate', [], {'name': 'P'}), container=cut)
+
+    with pytest.raises(ValueError, match="De-iteration is not valid: no identical graph found in an enclosing context."):
+        t.deiterate([p_pred.id])
+    _verify_graph_integrity(hg)
+
 def test_iteration_reversibility():
     """Tests that iterate/deiterate are inverses."""
     hg = EGHg()
@@ -197,14 +208,12 @@ def test_iteration_reversibility():
     
     original_clif = HypergraphToClif(hg).translate()
 
-    # Iterate (P x) into the cut
     t.iterate([p_pred.id], target_container_id=cut.id)
     
     # Find the newly iterated copy
     items_in_cut = hg.get_items_in_context(cut.id)
     new_p_pred_id = [i for i in items_in_cut if hg.edges[i].properties['name'] == 'P'][0]
 
-    # De-iterate it
     t.deiterate([new_p_pred_id])
 
     final_clif = HypergraphToClif(hg).translate()

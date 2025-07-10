@@ -6,7 +6,7 @@ This module provides a class for applying Peirce's transformation rules
 """
 
 import uuid
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 
 from eg_hypergraph import EGHg, Hyperedge, Node, NodeId, EdgeId
 
@@ -33,6 +33,33 @@ class EGTransformation:
                 raise ValueError("All items must be in the same container.")
         return container_id
 
+    def _get_canonical_signature(self, item_ids: List[uuid.UUID]) -> str:
+        """
+        Generates a canonical, sorted string signature for a subgraph.
+        This signature represents the structure and connections of the subgraph,
+        allowing for isomorphism checks.
+        """
+        subgraph_nodes = {i for i in item_ids if i in self.hg.nodes}
+        subgraph_edges = [i for i in item_ids if i in self.hg.edges]
+
+        edge_signatures = []
+        for edge_id in subgraph_edges:
+            edge = self.hg.edges[edge_id]
+            # For each node connected to the edge, represent it as either
+            # 'internal' (if part of the subgraph) or by its external ID.
+            node_reprs = []
+            for node_id in edge.nodes:
+                if node_id in subgraph_nodes:
+                    node_reprs.append(f"internal_{self.hg.nodes[node_id].properties.get('name', 'unnamed')}")
+                else:
+                    node_reprs.append(f"external_{node_id}")
+            
+            edge_signatures.append(
+                f"{edge.properties.get('name', edge.type)}:{','.join(sorted(node_reprs))}"
+            )
+        
+        return ";".join(sorted(edge_signatures))
+
     def add_double_cut(self, item_ids: List[uuid.UUID], container_id: Optional[EdgeId] = None):
         """Alpha Rule: Inserts a double cut."""
         if item_ids:
@@ -51,7 +78,6 @@ class EGTransformation:
         if item_ids:
             original_container_list = self.hg.edges[container_id].contained_items if container_id else None
             for item_id in list(item_ids):
-                # When moving from SA, there's no list to remove from.
                 if original_container_list is not None:
                     if item_id in original_container_list:
                          original_container_list.remove(item_id)
@@ -169,11 +195,38 @@ class EGTransformation:
     def deiterate(self, item_ids: List[uuid.UUID]):
         """
         Beta Rule: Removes a subgraph that is a redundant copy of a graph
-        in an enclosing context. A full implementation requires graph isomorphism,
-        so this version performs a simple erasure without context checks.
+        in an enclosing context.
         """
         if not item_ids: return
-        self._validate_subgraph(item_ids)
+        container_id = self._validate_subgraph(item_ids)
+        
+        # Generate the signature of the graph to be de-iterated.
+        target_signature = self._get_canonical_signature(item_ids)
+
+        # Walk up the ancestor contexts to find a match.
+        current_container_id = container_id
+        match_found = False
+        while not match_found:
+            # Move to the parent context.
+            if current_container_id is None: break # Reached the SA, no more ancestors
+            current_container_id = self.hg.containment.get(current_container_id)
+
+            # Check all items in the ancestor context for a match.
+            ancestor_items = self.hg.get_items_in_context(current_container_id)
+            for potential_match_id in ancestor_items:
+                # A simple check: if it's a predicate, does the name match?
+                # This is a heuristic to avoid checking every single item.
+                if potential_match_id in self.hg.edges:
+                    potential_match_sig = self._get_canonical_signature([potential_match_id])
+                    if potential_match_sig == target_signature:
+                        match_found = True
+                        break
+            if match_found: break
+        
+        if not match_found:
+            raise ValueError("De-iteration is not valid: no identical graph found in an enclosing context.")
+            
+        # If a match was found, the de-iteration is valid, so we can erase.
         for item_id in item_ids:
             self._erase_recursive(item_id)
 
