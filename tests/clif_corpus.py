@@ -1,3 +1,5 @@
+# new file: EG-CL/tests/clif_corpus.py
+
 """
 A corpus of CLIF expressions for round-trip testing.
 Each entry is a dictionary containing:
@@ -57,5 +59,22 @@ CORPUS = [
     {
         'clif': "(TuringWasAComputerScientist)",
         'description': "A simple, zero-arity proposition (constant)."
+    },
+    # --- New, more complex test cases ---
+    {
+        'clif': "(or (exists (x) (Cat x)) (exists (y) (Dog y)))",
+        'description': "Disjunction of two separate existential statements."
+    },
+    {
+        'clif': "(exists (x) (or (Cat x) (Dog x)))",
+        'description': "Existential quantifier over a disjunction."
+    },
+    {
+        'clif': "(forall (x) (if (and (Man x) (Rich x)) (Happy x)))",
+        'description': "Implication with a conjunction in the antecedent."
+    },
+    {
+        'clif': "(not (exists (x) (and (Cat x) (not (Black x)))))",
+        'description': "Equivalent to 'All cats are black'."
     }
 ]
