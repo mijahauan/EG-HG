@@ -166,6 +166,28 @@ class EGHg:
             # Return top-level items (those not contained in any edge).
             return [item_id for item_id, c_id in self.containment.items() if c_id is None]
 
+    def get_context_depth(self, item_id: uuid.UUID) -> int:
+        """
+        Calculates the nesting depth of an item (how many cuts it is inside).
+        The Sheet of Assertion is at depth 0.
+
+        Args:
+            item_id (uuid.UUID): The ID of the node or edge.
+
+        Returns:
+            int: The nesting depth of the item.
+        """
+        if item_id not in self.containment:
+            raise ValueError(f"Item {item_id} not found in graph.")
+        
+        depth = 0
+        current_container_id = self.containment[item_id]
+        while current_container_id is not None:
+            depth += 1
+            # Move up to the next container
+            current_container_id = self.containment.get(current_container_id)
+        return depth
+
     def __repr__(self) -> str:
         """Provides a concise string representation of the entire graph."""
         return f"EGHg(nodes={len(self.nodes)}, edges={len(self.edges)})"
