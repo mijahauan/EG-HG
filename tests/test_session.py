@@ -64,7 +64,7 @@ def test_undo_redo():
     session.apply_transformation('add_double_cut', item_ids=[], container_id=initial_cut_id)
     assert len(session.current_graph.edges) == 3
 
-    # State 2: Add another double cut
+    # State 2: Add another double cut inside the first one
     items_in_cut = session.current_graph.get_items_in_context(initial_cut_id)
     outer_cut_id = items_in_cut[0]
     session.apply_transformation('add_double_cut', item_ids=[], container_id=outer_cut_id)

@@ -44,8 +44,11 @@ def test_start_inning_with_thesis():
     session = game.start_inning(thesis_graph=thesis)
     
     assert isinstance(session, EGSession)
+    # The session's current graph should contain the thesis inside a cut.
     assert len(session.current_graph.nodes) == 1
-    assert not session.domain_model.nodes # Domain model should be empty
+    assert len(session.current_graph.edges) == 1
+    # The session's domain model should be an empty graph.
+    assert not session.domain_model.nodes
 
 def test_start_inning_with_domain_model():
     """
