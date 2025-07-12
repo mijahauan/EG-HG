@@ -45,14 +45,11 @@ def test_start_inning_with_thesis():
     
     assert isinstance(session, EGSession)
     assert len(session.current_graph.nodes) == 1
-    assert session.current_graph.nodes[list(session.current_graph.nodes.keys())[0]].properties['name'] == 'x'
+    assert not session.domain_model.nodes # Domain model should be empty
 
 def test_start_inning_with_domain_model():
     """
     Tests starting a new inning with a domain model from the folio.
-    Note: This test anticipates a more advanced implementation where the
-    domain model and thesis are merged. For now, it checks that the
-    session starts with the domain model.
     """
     game = EndoporeuticGame()
     
@@ -66,12 +63,13 @@ def test_start_inning_with_domain_model():
     thesis.add_node(Node('variable', {'name': 'x'}))
 
     # Start the inning
-    # The current implementation just uses the thesis, but we test the setup.
     session = game.start_inning(thesis_graph=thesis, domain_model_name="Greek Philosophy")
     
-    # In the current simple implementation, the session graph will be the thesis graph.
-    # A future implementation would merge them.
+    # The session should contain both the thesis and the domain model
     assert len(session.current_graph.nodes) == 1
+    assert len(session.domain_model.nodes) == 1
+    assert 'Socrates' in [n.properties.get('name') for n in session.domain_model.nodes.values()]
+
 
 def test_start_inning_with_nonexistent_domain_model_fails():
     """

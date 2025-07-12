@@ -7,6 +7,7 @@ and controls the creation and lifecycle of proof sessions ("innings").
 """
 
 from typing import Dict, Optional
+import copy
 
 from eg_hypergraph import EGHg
 from eg_session import EGSession
@@ -33,7 +34,7 @@ class EndoporeuticGame:
         """
         if name in self.folio:
             raise ValueError(f"A graph with the name '{name}' already exists in the folio.")
-        self.folio[name] = graph
+        self.folio[name] = copy.deepcopy(graph)
 
     def start_inning(self, thesis_graph: EGHg, domain_model_name: Optional[str] = None) -> EGSession:
         """
@@ -51,21 +52,13 @@ class EndoporeuticGame:
         Returns:
             EGSession: A new session object ready for transformations.
         """
-        initial_graph = EGHg()
-
-        # If a domain model is specified, copy it to the new graph first.
+        domain_model = None
         if domain_model_name:
             if domain_model_name not in self.folio:
                 raise ValueError(f"Domain model '{domain_model_name}' not found in folio.")
-            # We would perform a deep copy here to start the session
-            # For now, we'll assume the initial graph is just the thesis.
-            # A full implementation would merge the domain model and thesis.
-            initial_graph = self.folio[domain_model_name]
-
-
-        # For now, we will just start with the thesis graph.
-        # A more advanced implementation would merge the thesis with the domain model.
-        initial_graph = thesis_graph
+            domain_model = self.folio[domain_model_name]
         
-        return EGSession(initial_graph=initial_graph)
+        # A more advanced implementation could merge the domain model with the
+        # thesis graph on the Sheet of Assertion. For now, they are kept separate.
+        return EGSession(thesis_graph=thesis_graph, domain_model=domain_model)
 
