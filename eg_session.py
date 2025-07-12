@@ -10,7 +10,7 @@ from typing import List, Any, Optional, Dict
 import copy
 from enum import Enum
 
-from eg_hypergraph import EGHg, EdgeId, Hyperedge
+from eg_hypergraph import EGHg, EdgeId, Hyperedge, Node
 from eg_transformations import EGTransformation
 
 class Player(Enum):
@@ -41,17 +41,22 @@ class EGSession:
         """
         self.domain_model = domain_model or EGHg()
         
-        # The initial state is the thesis scribed on the Sheet of Assertion.
-        initial_graph = copy.deepcopy(thesis_graph)
+        # The game starts by placing the thesis inside a negation on the SA
+        # This represents the Proposer's goal: to show that (not thesis) is a contradiction.
+        initial_graph = EGHg()
+        negation_cut = initial_graph.add_edge(Hyperedge(edge_type='cut', nodes=[]))
         
+        # Use the transformation's copy logic to place the thesis inside the cut
+        copier = EGTransformation(initial_graph)
+        copier._copy_recursive(source_graph=thesis_graph, source_container_id=None, target_container=negation_cut)
+
         self._history: List[EGHg] = [initial_graph]
         self._history_index = 0
         
         self.player: Player = Player.PROPOSER
         self.status: GameStatus = GameStatus.IN_PROGRESS
-        # The ID of the cut that is the current focus of the game.
-        # None means the Sheet of Assertion is the contested area.
-        self.contested_context: Optional[EdgeId] = None
+        # The contested context is the initial negation cut
+        self.contested_context: Optional[EdgeId] = negation_cut.id
 
     @property
     def current_graph(self) -> EGHg:
@@ -81,14 +86,18 @@ class EGSession:
     def get_legal_moves(self) -> List[Dict[str, Any]]:
         """
         Determines the set of legal moves for the current player based on the
-        state of the contested graph. This is the core of the game's intelligence.
-        (This is a placeholder for a more complex implementation).
+        state of the contested graph. (This is a simplified placeholder).
         """
-        # A full implementation would inspect the contested context and return
-        # a list of valid (rule, arguments) tuples.
-        # For example, if the contested graph is `(not G)` and player is Proposer,
-        # the only move is to remove the negation.
-        return []
+        legal_moves = []
+        contested_items = self.current_graph.get_items_in_context(self.contested_context)
+        
+        # If the contested graph is a single negation, the only move is to remove it.
+        if len(contested_items) == 1 and contested_items[0] in self.current_graph.edges:
+             edge = self.current_graph.edges[contested_items[0]]
+             if edge.type == 'cut':
+                 legal_moves.append({'rule': 'remove_negation', 'target': edge.id})
+        
+        return legal_moves
 
     def take_turn(self, move: str, **kwargs: Any) -> GameStatus:
         """
@@ -98,17 +107,70 @@ class EGSession:
         if self.status != GameStatus.IN_PROGRESS:
             print("Warning: The game has already concluded.")
             return self.status
-
-        # In a full implementation, we would first check if the proposed move
-        # is in the list returned by get_legal_moves().
+        
+        # A full implementation would check against get_legal_moves() here.
         
         if self.apply_transformation(move, **kwargs):
-            # A full implementation would update the player and contested context
-            # based on the move made (e.g., removing a negation switches roles).
-            pass
+            # After a successful move, check for win/loss conditions.
+            self.check_for_win_loss()
 
-        # A full implementation would check for win/loss conditions here.
         return self.status
+
+    def remove_negation(self):
+        """
+        A special game move that removes the outermost negation of the
+        contested context, switches the player roles, and updates the
+        contested context to the area that was just exposed.
+        """
+        if self.contested_context is None:
+            raise ValueError("Cannot remove negation from the Sheet of Assertion.")
+        
+        # This is a high-level move that is composed of transformations.
+        # For now, we simulate it by creating a new state.
+        new_hg = copy.deepcopy(self.current_graph)
+        
+        # Promote the items from the cut to be removed.
+        cut_to_remove = new_hg.edges[self.contested_context]
+        parent_container_id = new_hg.containment[self.contested_context]
+        parent_container = new_hg.edges.get(parent_container_id) if parent_container_id else None
+
+        items_to_promote = list(cut_to_remove.contained_items)
+        for item_id in items_to_promote:
+            new_hg.containment[item_id] = parent_container_id
+            if parent_container:
+                parent_container.contained_items.append(item_id)
+        
+        # Remove the cut
+        if parent_container:
+            parent_container.contained_items.remove(self.contested_context)
+        del new_hg.containment[self.contested_context]
+        del new_hg.edges[self.contested_context]
+
+        # Update the history
+        self._history_index += 1
+        self._history = self._history[:self._history_index]
+        self._history.append(new_hg)
+
+        # Switch players and update the contested context
+        self.player = Player.SKEPTIC if self.player == Player.PROPOSER else Player.PROPOSER
+        # The new contested context is the area that was just exposed.
+        # This is a simplification; a full implementation would need to track this.
+        self.contested_context = items_to_promote[0] if items_to_promote else None
+        
+        self.check_for_win_loss()
+
+
+    def check_for_win_loss(self):
+        """Checks the current graph for win/loss conditions."""
+        contested_items = self.current_graph.get_items_in_context(self.contested_context)
+        if not contested_items: # The contested area is empty
+            if self.player == Player.PROPOSER:
+                self.status = GameStatus.PROPOSER_WIN
+            else: # Skeptic made the last move to empty the sheet
+                self.status = GameStatus.SKEPTIC_WIN
+        
+        # A full implementation would also check for the semantic mapping step.
+
 
     def undo(self):
         """Reverts to the previous state in the history."""

@@ -15,7 +15,8 @@ from eg_session import EGSession
 class EndoporeuticGame:
     """
     Manages a collection of named graphs (a folio) and the sessions (innings)
-    where proofs are constructed.
+    where proofs are constructed. This class is the main entry point for the
+    application's backend logic.
     """
     def __init__(self):
         """
@@ -56,9 +57,24 @@ class EndoporeuticGame:
         if domain_model_name:
             if domain_model_name not in self.folio:
                 raise ValueError(f"Domain model '{domain_model_name}' not found in folio.")
-            domain_model = self.folio[domain_model_name]
+            # Retrieve a copy of the domain model so the original is not affected.
+            domain_model = copy.deepcopy(self.folio[domain_model_name])
         
-        # A more advanced implementation could merge the domain model with the
-        # thesis graph on the Sheet of Assertion. For now, they are kept separate.
+        # The session is initialized with the thesis and the chosen domain model.
         return EGSession(thesis_graph=thesis_graph, domain_model=domain_model)
+
+    def bootstrap_domain(self, session: EGSession, new_model_name: str):
+        """
+        Extends a domain model based on the successful outcome of a game session.
+        This is used for the "Draw and Extend" outcome.
+
+        Args:
+            session (EGSession): The completed session whose final state will be
+                merged into the domain model.
+            new_model_name (str): The name for the new, extended domain model.
+        """
+        # A full implementation would merge the session's final graph with
+        # its initial domain model. For now, we just save the final state.
+        final_graph_state = session.current_graph
+        self.add_to_folio(new_model_name, final_graph_state)
 
